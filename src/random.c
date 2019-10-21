@@ -81,7 +81,7 @@ random_vdi_resolve(VRT_CTX, VCL_BACKEND dir)
 	udir_rdlock(vd);
 	CAST_OBJ_NOTNULL(rand, vd->priv, VMOD_DIRECTOR_RANDOM_MAGIC);
 	choices = rand->choices;
-	if (WS_Reserve(ctx->ws, 0) >= vd->n_backend * sizeof(*be_idx)) {
+	if (WS_ReserveAll(ctx->ws) >= vd->n_backend * sizeof(*be_idx)) {
 		be_idx = (void*)ctx->ws->f;
 		for (u = 0; u < vd->n_backend; u++) {
 			be = vd->backend[u];

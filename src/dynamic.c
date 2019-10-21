@@ -175,7 +175,7 @@ dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl
 	AN(sa);
 	AN(VSA_Build(sa, addr->ai_addr, addr->ai_addrlen));
 
-	(void)VRT_VSA_GetPtr(sa, &in_addr);
+	(void)VRT_VSA_GetPtr(ctx, sa, &in_addr);
 	AN(in_addr);
 	AN(inet_ntop(addr->ai_family, in_addr, ip, sizeof ip));
 
@@ -332,7 +332,7 @@ lookup_stop(VRT_CTX, struct dynamic_lookup *dns)
 	AZ(pthread_join(dns->thread, NULL));
 	dns->thread = 0;
 
-	VRT_rel_vcl(ctx, &dns->vclref);
+	VRT_VCL_Allow_Discard(&dns->vclref);
 }
 
 static void
@@ -343,7 +343,7 @@ lookup_start(VRT_CTX, struct dynamic_lookup *dns)
 	CHECK_OBJ_NOTNULL(dns, DYNAMIC_LOOKUP_MAGIC);
 
 	AZ(dns->vclref);
-	dns->vclref = VRT_ref_vcl(ctx, "DNS lookup");
+	dns->vclref = VRT_VCL_Prevent_Discard(ctx, "DNS lookup");
 
 	AZ(dns->thread);
 	AZ(pthread_create(&dns->thread, NULL, &lookup_thread, dns));
@@ -582,7 +582,6 @@ VCL_VOID vmod_dyndirector_lookup_addr(VRT_CTX,  struct vmod_unidirectors_dyndire
 
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(dyn, VMOD_UNIDIRECTORS_DYNDIRECTOR_MAGIC);
-	CHECK_OBJ_ORNULL(whitelist, VRT_ACL_MAGIC);
 
 	if (ctx->method != VCL_MET_INIT) {
 		VSB_printf(ctx->msg, ".lookup_addr only in vcl_init (%s).", dyn->vd->vcl_name);

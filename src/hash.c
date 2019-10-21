@@ -143,7 +143,7 @@ hash_vdi_resolve(VRT_CTX, VCL_BACKEND dir)
 	}
 	r = MurmurHash3_32(p, strlen(p), 0);
 	r = scalbn(r, -32);
-	if (WS_Reserve(ctx->ws, 0) >= vd->n_backend * sizeof(*be_idx)) {
+	if (WS_ReserveAll(ctx->ws) >= vd->n_backend * sizeof(*be_idx)) {
 		be_idx = (void*)ctx->ws->f;
 		for (u = 0; u < vd->n_backend; u++) {
 			be = vd->backend[u];
