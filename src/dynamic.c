@@ -85,7 +85,7 @@ static unsigned loadcnt = 0;
 
 static struct backend_ip *
 dynamic_add(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, struct suckaddr *sa,
-	    const char *ip, int af)
+	    const char *ip, int af, VCL_BACKEND via)
 {
 	struct vrt_backend vrt;
 	struct backend_ip *b;
@@ -120,6 +120,7 @@ dynamic_add(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, struct suckaddr 
 	INIT_OBJ(&vrt, VRT_BACKEND_MAGIC);
 	vrt.vcl_name = b->vcl_name;
 	vrt.port = dyn->port;
+	vrt.authority = dyn->authority;
 	vrt.probe = dyn->probe;
 	vrt.connect_timeout = dyn->connect_timeout;
 	vrt.first_byte_timeout = dyn->first_byte_timeout;
@@ -143,7 +144,7 @@ dynamic_add(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, struct suckaddr 
 		        vsc = c->vsc_cluster;
 			break;
 		}
-	b->be = VRT_new_backend_clustered(ctx, vsc, &vrt);
+	b->be = VRT_new_backend_clustered(ctx, vsc, &vrt, via);
 	AN(b->be);
 	DBG(ctx, dyn, "add-backend %s", b->vcl_name);
 
@@ -164,7 +165,7 @@ backend_fini(VRT_CTX, struct backend_ip *b)
 
 static struct backend_ip *
 dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl,
-		    struct addrinfo *addr)
+		 struct addrinfo *addr, VCL_BACKEND via)
 {
 	struct suckaddr *sa;
 	char ip[INET6_ADDRSTRLEN];
@@ -187,7 +188,7 @@ dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl
 		LOG(ctx, SLT_Error, dyn, "acl-mismatch %s", ip);
 	else {
 		struct backend_ip *b;
-		b = dynamic_add(ctx, dyn, sa, ip, addr->ai_family);
+		b = dynamic_add(ctx, dyn, sa, ip, addr->ai_family, via);
 		if (b)
 			return (b);
 	}
@@ -197,7 +198,7 @@ dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl
 
 static void
 dynamic_update(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl,
-	       struct addrinfo *addr)
+	       struct addrinfo *addr, VCL_BACKEND via)
 {
 	struct backend_ip *b, *b2;
 	struct vmod_unidirectors_director *vd;
@@ -213,7 +214,7 @@ dynamic_update(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl,
 		switch (addr->ai_family) {
 		case AF_INET:
 		case AF_INET6:
-			dynamic_add_addr(ctx, dyn, acl, addr);
+			dynamic_add_addr(ctx, dyn, acl, addr, via);
 			break;
 		default:
 			DBG(ctx, dyn, "ignored family=%d", addr->ai_family);
@@ -286,7 +287,7 @@ lookup_thread(void *priv)
 			    error, gai_strerror(error));
 		else {
 			if (dns->active) {
-				dynamic_update(&ctx, dns->dyn, dns->whitelist, res);
+				dynamic_update(&ctx, dns->dyn, dns->whitelist, res, NULL); // XXX via
 				update = VTIM_real();
 				dynamic_timestamp(dns, "Update", update,
 						  update - lookup, update - results);
@@ -471,13 +472,13 @@ vmod_dyndirector_update_IPs(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn,
 			break;
 		p = sep + 1;
         }
-	dynamic_update(ctx, dyn, NULL, hints.ai_next);
+	dynamic_update(ctx, dyn, NULL, hints.ai_next, NULL); // XXX via
 	freeaddrinfo(hints.ai_next);
 }
 
 VCL_VOID v_matchproto_()
 vmod_dyndirector_add_IP(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn,
-			VCL_STRING ip, double w)
+			VCL_STRING ip, double w, VCL_BACKEND via)
 {
 	int error = 0;
 	struct addrinfo hints, *addr;
@@ -500,7 +501,7 @@ vmod_dyndirector_add_IP(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn,
 		case AF_INET:
 		case AF_INET6:
 			AZ(pthread_mutex_lock(&dyn->mtx));
-			b = dynamic_add_addr(ctx, dyn, NULL, addr);
+			b = dynamic_add_addr(ctx, dyn, NULL, addr, via);
 			if (b) {
 				udir_wrlock(vd);
 				b->updated = _udir_add_backend(ctx, vd, b->be, w);
@@ -629,6 +630,7 @@ vmod_dynamics_number_expected(VRT_CTX, VCL_INT n)
 VCL_VOID v_matchproto_()
 vmod_dyndirector__init(VRT_CTX, struct vmod_unidirectors_dyndirector **dynp, const char *vcl_name,
 		       VCL_STRING service,
+		       VCL_STRING authority,
 		       VCL_PROBE probe,
 		       VCL_DURATION connect_timeout,
 		       VCL_DURATION first_byte_timeout,
@@ -672,6 +674,8 @@ vmod_dyndirector__init(VRT_CTX, struct vmod_unidirectors_dyndirector **dynp, con
 	AZ(pthread_mutex_init(&dyn->mtx, NULL));
 	VTAILQ_INIT(&dyn->backends);
 	dyn->port = strdup(port);
+	if (authority)
+	        dyn->authority = strdup(authority);
 	dyn->probe = probe;
 	dyn->connect_timeout = connect_timeout;
 	dyn->first_byte_timeout = first_byte_timeout;
@@ -694,6 +698,7 @@ vmod_dyndirector__fini(struct vmod_unidirectors_dyndirector **dynp)
 	assert(VTAILQ_EMPTY(&dyn->backends));
 
 	free(dyn->port);
+	free(dyn->authority);
 	AZ(pthread_mutex_destroy(&dyn->mtx));
 
 	vmod_director__fini(&dyn->vd);

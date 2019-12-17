@@ -187,6 +187,7 @@ Example
 
 $Object dyndirector(
 	STRING port			= "http",
+	STRING authority		= NULL,
 	PROBE probe			= 0,
 	DURATION connect_timeout	= 0,
 	DURATION first_byte_timeout	= 0,
@@ -239,7 +240,7 @@ Description
 Example
 	udir.leastconn(30);
 
-$Method VOID .add_IP(STRING ip, REAL weight=1.0)
+$Method VOID .add_IP(STRING ip, REAL weight=1.0, BACKEND via=NULL)
 
 Description
 	Add a dynamic backend with IP and an optional weight if not already set.
