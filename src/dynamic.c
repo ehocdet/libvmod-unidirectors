@@ -85,7 +85,7 @@ static unsigned loadcnt = 0;
 
 static struct backend_ip *
 dynamic_add(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, struct suckaddr *sa,
-	    const char *ip, int af, VCL_BACKEND via)
+	    const char *ip, int af)
 {
 	struct vrt_backend vrt;
 	struct backend_ip *b;
@@ -144,7 +144,7 @@ dynamic_add(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, struct suckaddr 
 		        vsc = c->vsc_cluster;
 			break;
 		}
-	b->be = VRT_new_backend_clustered(ctx, vsc, &vrt, via);
+	b->be = VRT_new_backend_clustered(ctx, vsc, &vrt, dyn->via);
 	AN(b->be);
 	DBG(ctx, dyn, "add-backend %s", b->vcl_name);
 
@@ -165,7 +165,7 @@ backend_fini(VRT_CTX, struct backend_ip *b)
 
 static struct backend_ip *
 dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl,
-		 struct addrinfo *addr, VCL_BACKEND via)
+		 struct addrinfo *addr)
 {
 	struct suckaddr *sa;
 	char ip[INET6_ADDRSTRLEN];
@@ -188,7 +188,7 @@ dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl
 		LOG(ctx, SLT_Error, dyn, "acl-mismatch %s", ip);
 	else {
 		struct backend_ip *b;
-		b = dynamic_add(ctx, dyn, sa, ip, addr->ai_family, via);
+		b = dynamic_add(ctx, dyn, sa, ip, addr->ai_family);
 		if (b)
 			return (b);
 	}
@@ -198,7 +198,7 @@ dynamic_add_addr(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl
 
 static void
 dynamic_update(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl,
-	       struct addrinfo *addr, VCL_BACKEND via)
+	       struct addrinfo *addr)
 {
 	struct backend_ip *b, *b2;
 	struct vmod_unidirectors_director *vd;
@@ -214,7 +214,7 @@ dynamic_update(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn, VCL_ACL acl,
 		switch (addr->ai_family) {
 		case AF_INET:
 		case AF_INET6:
-			dynamic_add_addr(ctx, dyn, acl, addr, via);
+			dynamic_add_addr(ctx, dyn, acl, addr);
 			break;
 		default:
 			DBG(ctx, dyn, "ignored family=%d", addr->ai_family);
@@ -287,7 +287,7 @@ lookup_thread(void *priv)
 			    error, gai_strerror(error));
 		else {
 			if (dns->active) {
-				dynamic_update(&ctx, dns->dyn, dns->whitelist, res, NULL); // XXX via
+				dynamic_update(&ctx, dns->dyn, dns->whitelist, res);
 				update = VTIM_real();
 				dynamic_timestamp(dns, "Update", update,
 						  update - lookup, update - results);
@@ -472,13 +472,13 @@ vmod_dyndirector_update_IPs(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn,
 			break;
 		p = sep + 1;
         }
-	dynamic_update(ctx, dyn, NULL, hints.ai_next, NULL); // XXX via
+	dynamic_update(ctx, dyn, NULL, hints.ai_next);
 	freeaddrinfo(hints.ai_next);
 }
 
 VCL_VOID v_matchproto_()
 vmod_dyndirector_add_IP(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn,
-			VCL_STRING ip, double w, VCL_BACKEND via)
+			VCL_STRING ip, double w)
 {
 	int error = 0;
 	struct addrinfo hints, *addr;
@@ -501,7 +501,7 @@ vmod_dyndirector_add_IP(VRT_CTX, struct vmod_unidirectors_dyndirector *dyn,
 		case AF_INET:
 		case AF_INET6:
 			AZ(pthread_mutex_lock(&dyn->mtx));
-			b = dynamic_add_addr(ctx, dyn, NULL, addr, via);
+			b = dynamic_add_addr(ctx, dyn, NULL, addr);
 			if (b) {
 				udir_wrlock(vd);
 				b->updated = _udir_add_backend(ctx, vd, b->be, w);
@@ -630,6 +630,7 @@ vmod_dynamics_number_expected(VRT_CTX, VCL_INT n)
 VCL_VOID v_matchproto_()
 vmod_dyndirector__init(VRT_CTX, struct vmod_unidirectors_dyndirector **dynp, const char *vcl_name,
 		       VCL_STRING service,
+		       VCL_BACKEND via,
 		       VCL_STRING authority,
 		       VCL_PROBE probe,
 		       VCL_DURATION connect_timeout,
@@ -674,6 +675,7 @@ vmod_dyndirector__init(VRT_CTX, struct vmod_unidirectors_dyndirector **dynp, con
 	AZ(pthread_mutex_init(&dyn->mtx, NULL));
 	VTAILQ_INIT(&dyn->backends);
 	dyn->port = strdup(port);
+	dyn->via = via;
 	if (authority)
 	        dyn->authority = strdup(authority);
 	dyn->probe = probe;

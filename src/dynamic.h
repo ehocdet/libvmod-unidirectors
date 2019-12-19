@@ -54,6 +54,7 @@ struct vmod_unidirectors_dyndirector {
 	VCL_PROBE		probe;
 	char			*port;
 	char			*authority;
+	VCL_BACKEND		via;
 	VCL_INT			max_connections;
 	VCL_DURATION		connect_timeout;
 	VCL_DURATION		first_byte_timeout;
